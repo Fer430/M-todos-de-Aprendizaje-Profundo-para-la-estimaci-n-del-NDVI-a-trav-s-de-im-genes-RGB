@@ -47,7 +47,6 @@ contratos <- readLines("contratos.txt")
 
 for (contrato in contratos) {
   
-  contrato
   descarga_todos <- sen2r::sen2r(
                   param_list = param_list,
                   apihub = apihub,
