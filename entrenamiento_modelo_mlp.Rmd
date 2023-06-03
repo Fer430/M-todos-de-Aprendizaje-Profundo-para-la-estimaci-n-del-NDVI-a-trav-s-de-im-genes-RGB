@@ -1,0 +1,620 @@
+---
+title: "prueba_Imagenes_Keras"
+author: "Fernando García Ortega"
+date: '2023-01-16'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Librerías que necesitamos
+```{r,eval=TRUE}
+library(keras)
+library(caret)
+library(tiff)
+library(rlist)
+library(abind)
+library(SpatialPack)
+library(raster)
+```
+
+
+
+```{r,eval=TRUE}
+
+# Funciones para el cálculo de índices de riego
+rgbvi <- function(x) {
+  R = x[1]
+  G = x[2]
+  B = x[3]
+  if ((G**2+R+B) == 0)
+    return(NA)
+  return((G-B*R)/(G**2+R+B))
+  
+}
+
+gli <- function(x) {
+  R = x[1]
+  G = x[2]
+  B = x[3]
+  if ((2*G+R+B) == 0)
+    return(NA)
+  return((2*G-R-B)/(2*G+R+B))
+  
+}
+
+vndvi <- function(x) {
+  R = x[1]
+  G = x[2]
+  B = x[3]
+  if (R == 0 || B == 0)
+    return(NA)
+  return(0.5268*(R**(-0.1294) * G**0.3389 * B**(-0.3128)))
+  
+}
+
+```
+
+
+
+```{r,eval=TRUE}
+proximidad <- function(x, y) {
+  
+  # Creamos las listas que almacenarán los valores de los píxeles de la posición i respecto al píxel
+  pixel_cero <- list()
+  pixel_uno <- list()
+  pixel_dos <- list()
+  pixel_tres <- list()
+  pixel_cuatro <- list()
+  pixel_cinco <- list()
+  pixel_seis <- list()
+  pixel_siete <- list()
+  
+  cont_general <- 1
+  cont_image <- 1
+  
+  for (i in 1:length(y)){
+    for (j in 1:(y[[i]][1]*y[[i]][2])){
+      
+      # Se añaden los tres pixeles de la izquierda si existen
+      # Se añade el izquierda-superior en caso de que exista, si no se completa con 0.0001
+      if (cont_image-(y[[i]][1]+1) > 0){
+        pixel_cero[[cont_general]] <- matrix(x[cont_general - (y[[i]][1]+1), ], nrow = 1, ncol=3)
+      }
+      else{
+        pixel_cero[[cont_general]] <- matrix(0.0001, nrow = 1, ncol=3)
+      }
+      
+      # Se añade el izquierda-medio en caso de que exista, si no se completa con 0.0001
+      if (cont_image-y[[i]][1] > 0){
+        pixel_uno[[cont_general]] <- matrix(x[cont_general - y[[i]][1], ], nrow = 1, ncol=3)
+      }
+      else{
+        pixel_uno[[cont_general]] <- matrix(0.0001, nrow = 1, ncol=3)
+      }
+      
+      # Se añade el izquierda-inferior en caso de que exista, si no se completa con 0.0001
+      if (cont_image-(y[[i]][1]-1) > 0){
+        pixel_dos[[cont_general]] <- matrix(x[cont_general - (y[[i]][1]-1), ], nrow = 1, ncol=3)
+      }
+      else{
+        pixel_dos[[cont_general]] <- matrix(0.0001, nrow = 1, ncol=3)
+      }
+      
+      # Se añaden el píxel de arriba y el de abajo
+      # Se añade el superior en caso de que exista, si no se completa con 0.0001
+      if (cont_image-1 > 0 && (cont_image-1) %% y[[i]][1] != 0){
+        pixel_tres[[cont_general]] <- matrix(x[cont_general - 1, ], nrow = 1, ncol=3)
+      }
+      else{
+        pixel_tres[[cont_general]] <- matrix(0.0001, nrow = 1, ncol=3)
+      }
+      
+      # Se añade el inferior en caso de que exista, si no se completa con 0.0001
+      if (cont_image+1 <= (y[[i]][1]*y[[i]][2]) && (cont_image+1) %% y[[i]][1] != 1){
+        pixel_cuatro[[cont_general]] <- matrix(x[cont_general + 1, ], nrow = 1, ncol=3)
+      }
+      else{
+        pixel_cuatro[[cont_general]] <- matrix(0.0001, nrow = 1, ncol=3)
+      }
+      
+      # Se añaden los tres pixeles de la derecha si existen
+      # Se añade el derecha-superior en caso de que exista, si no se completa con 0.0001
+      if (cont_image+(y[[i]][1]-1) <= (y[[i]][1]*y[[i]][2])){
+        pixel_cinco[[cont_general]] <- matrix(x[cont_general + (y[[i]][1]-1), ], nrow = 1, ncol=3)
+      }
+      else{
+        pixel_cinco[[cont_general]] <- matrix(0.0001, nrow = 1, ncol=3)
+      }
+      
+      # Se añade el derecha-medio en caso de que exista, si no se completa con 0.0001
+      if (cont_image+y[[i]][1] <= (y[[i]][1]*y[[i]][2])){
+        pixel_seis[[cont_general]] <- matrix(x[cont_general + y[[i]][1], ], nrow = 1, ncol=3)
+      }
+      else{
+        pixel_seis[[cont_general]] <- matrix(0.0001, nrow = 1, ncol=3)
+      }
+      
+      # Se añade el izquierda-inferior en caso de que exista, si no se completa con 0.0001
+      if (cont_image+(y[[i]][1]+1) <= (y[[i]][1]*y[[i]][2])){
+        pixel_siete[[cont_general]] <- matrix(x[cont_general + (y[[i]][1]+1), ], nrow = 1, ncol=3)
+      }
+      else{
+        pixel_siete[[cont_general]] <- matrix(0.0001, nrow = 1, ncol=3)
+      }
+      
+      cont_general <- cont_general + 1
+      cont_image <- cont_image + 1
+      
+    }
+    
+    cont_image <- 1
+  }
+  
+  # Añadimos las listas generadas al dataframe
+  cero_matrix <- do.call(rbind, pixel_cero)
+  cero_data_frame <- as.data.frame(cero_matrix)
+  
+  uno_matrix <- do.call(rbind, pixel_uno)
+  uno_data_frame <- as.data.frame(uno_matrix)
+  
+  dos_matrix <- do.call(rbind, pixel_dos)
+  dos_data_frame <- as.data.frame(dos_matrix)
+  
+  tres_matrix <- do.call(rbind, pixel_tres)
+  tres_data_frame <- as.data.frame(tres_matrix)
+  
+  cuatro_matrix <- do.call(rbind, pixel_cuatro)
+  cuatro_data_frame <- as.data.frame(cuatro_matrix)
+  
+  cinco_matrix <- do.call(rbind, pixel_cinco)
+  cinco_data_frame <- as.data.frame(cinco_matrix)
+  
+  seis_matrix <- do.call(rbind, pixel_seis)
+  seis_data_frame <- as.data.frame(seis_matrix)
+  
+  siete_matrix <- do.call(rbind, pixel_siete)
+  siete_data_frame <- as.data.frame(siete_matrix)
+  
+  x <- data.frame(cbind(x, cero_data_frame, uno_data_frame, dos_data_frame, tres_data_frame, cuatro_data_frame, cinco_data_frame, seis_data_frame, siete_data_frame))
+  colnames(x) <- c("R","G","B","R0","G0","B0","R1","G1","B1","R2","G2","B2","R3","G3","B3","R4","G4","B4","R5","G5","B5","R6","G6","B6","R7","G7","B7")
+  return(x)
+}
+
+```
+
+
+
+```{r,eval=FALSE}
+
+# Hacemos una lista con los contratos que formarán el conjunto de datos
+contratos <- as.list(strsplit(list.files(path = "~/Escritorio/Practicas/TFG/datos/verdor/images", full.names = TRUE), "\n"))
+
+# Creamos las listas que almacenarán las rutas de los ficheros RGB y NDVI
+rgb_files <- list()
+ndvi_files <- list()
+
+# Rellenamos las listas con las rutas de los ficheros RGB y NDVI
+for (i in 1:length(contratos)){
+  list_files <- list.files(path = paste0(contratos[i],"/RGB432B"), full.names = TRUE, pattern = "\\.tif")
+  if (length(list_files) != 0){
+    for (j in 1:length(list_files)){
+      if (file.exists( gsub("RGB432B", c("NDVI"), list_files[j]))  )
+      {
+          rgb_files <- append(rgb_files,list_files[j])
+          ndvi_files <- append(ndvi_files,gsub("RGB432B", c("NDVI"), list_files[j]))
+      }
+    }
+  }
+}
+
+```
+
+
+
+```{r, warning=FALSE, eval=FALSE}
+
+# Creamos las listas que contendrán las imágenes RGB y NDVI
+rgb_values <- list()
+ndvi_values <- list()
+# Creamos la lista con las dimensiones originales de las imágenes
+dimensiones <- list()
+
+# Leemos los ficheros y los almacenamos en el array correspondiente
+for (i in 1:length(rgb_files)){
+  
+    current_image_rgb <- tiff::readTIFF(rgb_files[[i]])
+    current_image_ndvi <- tiff::readTIFF(ndvi_files[[i]])
+  
+    rgb_values[[i]] <- current_image_rgb
+    dim(rgb_values[[i]]) <-  c(dim(rgb_values[[i]])[1]*dim(rgb_values[[i]])[2], dim(rgb_values[[i]])[3])
+    
+    ndvi_values[[i]] <- current_image_ndvi
+    dimensiones[[i]]<-dim(ndvi_values[[i]])
+
+}
+
+```
+
+
+
+```{r,eval=FALSE}
+
+# Creamos el dataframe con los valores RGB de las imágenes
+rgb_matrix <- do.call(rbind, rgb_values)
+rgb_matrix <-replace(rgb_matrix, rgb_matrix <= 0, 0.0001)
+rgb_data_frame <- as.data.frame(rgb_matrix)
+
+# Creamos el dataframe con los valores NDVI
+ndvi_matrix <- as.matrix(unlist(ndvi_values))
+ndvi_matrix <-replace(ndvi_matrix, ndvi_matrix <= 0, 0.0001)
+ndvi_data_frame <- as.data.frame(ndvi_matrix)
+
+# Añadimos al dataframe de los predictores los valores de los píxeles de alrededor
+rgb_data_frame <- proximidad(rgb_data_frame, dimensiones)
+
+```
+
+
+
+```{r,eval=FALSE}
+
+# Calculamos los valores de los índices de riego 
+rgbvi_matrix <- apply(rgb_matrix, 1, rgbvi)
+gli_matrix <- apply(rgb_matrix, 1, gli)
+vndvi_matrix <- apply(rgb_matrix, 1, vndvi)
+
+# Añadimos los índices y la variable respuesta al dataframe
+data_set <- cbind(rgb_data_frame, rgbvi_matrix, gli_matrix, vndvi_matrix, ndvi_data_frame)
+
+colnames(data_set) <- c("R","G","B","R0","G0","B0","R1","G1","B1","R2","G2","B2","R3","G3","B3","R4","G4","B4","R5","G5","B5","R6","G6","B6","R7","G7","B7","RGBVI","GLI","VNDVI","NDVI")
+
+
+```
+
+
+
+```{r,eval=FALSE}
+
+#x_data_frame_sample <- subset(x_data_frame, x_data_frame$NDVI != 0.0001)
+data_set_sample <- data_set[sample(1:nrow(data_set),767363),1:ncol(data_set)] #Seleccinamos la muestra
+data_set_sample <- data.frame(lapply(data_set_sample, as.numeric))
+#x_data_frame_sample <- replace(x_data_frame_sample, x_data_frame_sample == 1e-04, 0.0001)
+
+
+TrainIdx.80 <- createDataPartition(data_set_sample$NDVI,
+                                             p = 0.8,
+                                             list = F,
+                                             times = 1)
+
+
+```
+
+
+
+```{r,eval=FALSE}
+
+# Separamos los dataframes destinados para el entrenamiento y la evaluación
+x_train <- data_set_sample[TrainIdx.80,]
+x_test <- data_set_sample[-TrainIdx.80,]
+
+# Creamos un dataframe de menor tamaño para el algoritmo RFE
+x_train_rfe <- x_train[sample(1:nrow(x_train),15000),1:ncol(x_train)] #Seleccinamos la muestra
+
+```
+
+
+
+```{r,eval=FALSE}
+
+# Guardamos los dataframes de entrenamiento y evaluación
+write.csv(x_train, "/home/fernando/Escritorio/Practicas/TFG/x_train.csv", row.names = FALSE)
+write.csv(x_test, "/home/fernando/Escritorio/Practicas/TFG/x_test.csv", row.names = FALSE)
+
+```
+
+
+
+```{r,eval=TRUE}
+
+# Leemos los dataframes de entrenamiento y evaluación
+x_train <- read.csv("/home/fernando/Escritorio/Practicas/TFG/x_train.csv")
+x_test <- read.csv("/home/fernando/Escritorio/Practicas/TFG/x_test.csv")
+
+```
+
+
+
+```{r,warning=FALSE,eval=FALSE}
+
+# Ejecutamos el algoritmo RFE para conocer los predictores más importantes
+predictors = x_train_rfe[,1:30]
+outcome = x_train_rfe[,31]
+
+library(doParallel)
+cl <- makePSOCKcluster(4)
+registerDoParallel(cl)
+
+lmProfile = rfe(predictors, outcome,
+                sizes = c(5, 10,15,20),
+                rfeControl = rfeControl(functions = treebagFuncs,
+                                        method = "cv",
+                                        number = 5,
+                                        verbose = FALSE))
+
+stopCluster(cl)
+summary(lmProfile)
+
+
+
+```
+
+
+
+```{r,eval=TRUE}
+
+#saveRDS(lmProfile, file = "lmProfile.rds")
+
+lmProfile <- readRDS("lmProfile.rds")
+
+```
+
+
+
+```{r,eval=TRUE}
+
+lmProfile
+
+# Guardamos los predictores más importantes en una lista
+rfe.predictors <- predictors(lmProfile)
+
+```
+
+
+
+```{r,eval=TRUE}
+
+# Establecemos las características de la crossvalidación, que en este caso será de 10 pliegues
+trControl <- trainControl(method = "repeatedcv",
+                            number = 10, # Crosvalidación de 10 pliegues
+                            repeats = 3, # Realizar 3 repeticiones
+                          )
+```
+
+
+
+```{r,eval=TRUE}
+
+grid.mlp = expand.grid(size = c(1000),
+            batch_size = c(1000),
+            dropout = c(0),
+            lr = c(2e-1),
+            decay = c(0.005),
+            rho = c(0.9),
+            activation = c('relu'))
+
+print(grid.mlp)
+
+```
+
+
+
+```{r,eval=FALSE}
+
+# Entrenamos el modelo
+library(doParallel)
+cl <- makePSOCKcluster(4)
+registerDoParallel(cl)
+system.time(
+  mlpKerasDropout_tiff <-train(x_train[rfe.predictors],
+                                 x_train[[31]],
+                                 method='mlpKerasDropout',
+                                 tuneGrid = grid.mlp,  
+                                 epochs = 10,
+                                 trControl = trControl))
+
+stopCluster(cl)
+
+```
+
+
+
+```{r,eval=FALSE}
+
+saveRDS(mlpKerasDropout_tiff, file = "mlp_model_tiff_pixeles")
+
+```
+
+
+
+```{r,warning=FALSE,eval=TRUE}
+
+mlpKerasDropout_tiff <- readRDS("mlp_model_tiff_pixeles")
+
+```
+
+
+
+```{r,eval=TRUE}
+
+mlpKerasDropout_tiff
+
+```
+
+
+
+```{r,eval=FALSE}
+
+# Utilizamos el conjunto de evaluación para comprobar la eficiencia del modelo
+model_validation_mlp <- predict(mlpKerasDropout_tiff,x_train[rfe.predictors])
+# Calculamos el RMSE
+rmse_mlp <- MLmetrics::RMSE(model_validation_mlp,x_train[,31])
+# Calculamos el R-Squared
+r2_mlp <- MLmetrics::R2_Score(model_validation_mlp,x_train[,31])
+# Calculamos el MSE
+mse_mlp <- MLmetrics::MSE(model_validation_mlp,x_train[,31])
+# Calculamos el MAE
+mae_mlp <- MLmetrics::MAE(model_validation_mlp,x_train[,31])
+# Calculamos el F1-Score
+#f1score_mlp <- MLmetrics::F1_Score(model_validation_mlp,x_test[,31])
+# Calculamos el SSIM
+ssim_mlp <- SpatialPack::SSIM(as.matrix(model_validation_mlp), as.matrix(x_train[,31]))
+# Calculamos el MAPE
+mape_mlp <- MLmetrics::MAPE(model_validation_mlp,x_train[,31])
+# Calculamos el CVRMSE
+cvrmse_mlp <- rmse_mlp/mean(model_validation_mlp)
+
+rmse_mlp
+r2_mlp
+mse_mlp
+mae_mlp
+ssim_mlp
+#psnr_mlp
+#f1score_mlp
+mape_mlp
+cvrmse_mlp
+
+```
+
+
+
+```{r,warning=FALSE,eval=TRUE}
+
+# Utilizamos el conjunto de evaluación para comprobar la eficiencia del modelo
+model_validation_mlp <- predict(mlpKerasDropout_tiff,x_test[rfe.predictors])
+# Calculamos el RMSE
+rmse_mlp <- MLmetrics::RMSE(model_validation_mlp,x_test[,31])
+# Calculamos el R-Squared
+r2_mlp <- MLmetrics::R2_Score(model_validation_mlp,x_test[,31])
+# Calculamos el MSE
+mse_mlp <- MLmetrics::MSE(model_validation_mlp,x_test[,31])
+# Calculamos el MAE
+mae_mlp <- MLmetrics::MAE(model_validation_mlp,x_test[,31])
+# Calculamos el F1-Score
+#f1score_mlp <- MLmetrics::F1_Score(model_validation_mlp,x_test[,31])
+# Calculamos el SSIM
+ssim_mlp <- SpatialPack::SSIM(as.matrix(model_validation_mlp), as.matrix(x_test[,31]))
+# Calculamos el MAPE
+mape_mlp <- MLmetrics::MAPE(model_validation_mlp,x_test[,31])
+# Calculamos el CVRMSE
+cvrmse_mlp <- rmse_mlp/mean(model_validation_mlp)
+
+rmse_mlp
+r2_mlp
+mse_mlp
+mae_mlp
+ssim_mlp
+#f1score_mlp
+mape_mlp
+cvrmse_mlp
+
+```
+
+
+
+```{r,eval=TRUE}
+
+# Imprimimos el ajuste del modelo al conjunto de datos
+datos_grafica_mlp <- as.data.frame(cbind(model_validation_mlp,x_test[,31]))
+datos_grafica_mlp <- dplyr::distinct(datos_grafica_mlp)
+colnames(datos_grafica_mlp) <- c("predicted","original")
+
+grafica_mlp <- ggplot(datos_grafica_mlp, aes(x = predicted, y = original)) +
+                geom_point(size=0.05) +
+                geom_smooth(method='lm',se = FALSE) +
+                labs(title="Ajuste modelo MLP")
+grafica_mlp
+
+```
+
+
+
+```{r,warning=FALSE,eval=TRUE}
+
+# Hacemos una prueba visual del modelo
+# Leemos el archivo RGB y almacenamos sus valores en un dataframe
+archivo_inicial <- tiff::readTIFF("/home/fernando/Escritorio/Practicas/TFG/datos/verdor/images/6354706/RGB432B/S2A2A_20200530_051_6354706_RGB432B_10.tif")
+dimensions <- list()
+dimensions[[1]] <- c(dim(archivo_inicial)[1],dim(archivo_inicial)[2])
+dim(archivo_inicial) <-  c(dim(archivo_inicial)[1]*dim(archivo_inicial)[2], dim(archivo_inicial)[3])
+archivo_inicial_data_frame <- as.data.frame(archivo_inicial)
+archivo_inicial_data_frame <- proximidad(archivo_inicial_data_frame, dimensions)
+archivo_inicial_data_frame <- data.frame(lapply(archivo_inicial_data_frame, as.numeric))
+
+archivo_inicial <-replace(archivo_inicial, archivo_inicial <= 0, 0.0001)
+
+# Leemos el archivo NDVI y almacenamos sus valores en un dataframe
+archivo_final <- tiff::readTIFF("/home/fernando/Escritorio/Practicas/TFG/datos/verdor/images/6354706/NDVI/S2A2A_20200530_051_6354706_NDVI_10.tif")
+
+dim(archivo_final) <- c(dim(archivo_final)[1]*dim(archivo_final)[2])
+archivo_final <-replace(archivo_final, archivo_final <= 0, 0.0001)
+
+prueba_rgbvi <- apply(archivo_inicial, 1, rgbvi)
+prueba_gli <- apply(archivo_inicial, 1, gli)
+prueba_vndvi <- apply(archivo_inicial, 1, vndvi)
+
+```
+
+
+
+```{r,warning=FALSE,eval=TRUE}
+
+# Construimos el dataframe de la prueba y predecimos le resultado, guardando tanto la imagen original como la imagen predicha por el modelo
+prueba_dataframe <- as.data.frame(cbind(archivo_inicial_data_frame, prueba_rgbvi, prueba_gli, prueba_vndvi, archivo_final))
+colnames(prueba_dataframe) <- c("R","G","B","R0","G0","B0","R1","G1","B1","R2","G2","B2","R3","G3","B3","R4","G4","B4","R5","G5","B5","R6","G6","B6","R7","G7","B7","RGBVI","GLI","VNDVI","NDVI")
+
+image_predict_mlp <- predict(mlpKerasDropout_tiff, prueba_dataframe[rfe.predictors])
+
+image_predict_mlp <- matrix(image_predict_mlp)
+dim(image_predict_mlp) <- c(dimensions[[1]][1],dimensions[[1]][2])
+
+archivo_final <- matrix(archivo_final)
+dim(archivo_final) <- c(dimensions[[1]][1],dimensions[[1]][2])
+
+
+tiff::writeTIFF(image_predict_mlp, where="/home/fernando/Escritorio/Practicas/TFG/prediccion_mlp_pixeles.tif")
+tiff::writeTIFF(archivo_final, where="/home/fernando/Escritorio/Practicas/TFG/original_pixeles.tif")
+
+```
+
+
+
+```{r,eval=TRUE}
+
+# Establecemos una leyenda de colores para la visualización por pantalla de ambas imágenes
+leyenda <- read.table("/home/fernando/Escritorio/Practicas/TFG/NDVI.txt", sep=",", header=TRUE)
+cortes <- rev(c(leyenda[,1]))
+colores <- rev(c(leyenda[,2]))
+
+```
+
+
+
+```{r,warning=FALSE,eval=TRUE}
+
+# Visualizamos ambas imágenes
+imagen_original <- raster("/home/fernando/Escritorio/Practicas/TFG/original_pixeles.tif")
+imagen_modelo <- raster("/home/fernando/Escritorio/Practicas/TFG/prueba_mlp_pixeles.tif")
+
+plot(imagen_original)
+
+plot(imagen_modelo)
+
+```
+
+
+```{r, warning=FALSE,eval=TRUE}
+png("/home/fernando/Descargas/grafico_og.png")
+plot(imagen_original, legend = FALSE, axes = FALSE)
+dev.off()
+```
+
+
+
+```{r, warning=FALSE,eval=TRUE}
+png(filename = "/home/fernando/Descargas/grafico_ndvi.png")
+plot(imagen_modelo, legend = FALSE, axes = FALSE)
+dev.off()
+```

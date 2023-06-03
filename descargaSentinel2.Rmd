@@ -1,0 +1,63 @@
+---
+title: "descargaSentinel2"
+author: "Fernando García Ortega"
+date: '2023-02-16'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Inicialización de variables
+
+Algunos de los parámetros más importantes para la descarga de imágenes de sentinel2:
+
+param_list: Ruta del fichero ".json" con los parámetros de la solicitud.
+apihub: Ruta del fichero con el usuario y contraseña de sentinel2.
+timewindow: Ventana de tiempo de las imágenes solicitadas.
+extent: Ruta del fichero ".geojson" con datos del contrato seleccionado.
+extent_namem: Nombre del contrato seleccionado.
+path_out: Ruta de la carpeta destino de las imágenes.
+
+```{r, warning=TRUE}
+
+param_list = "sen2r_params.json"   
+apihub = "apihub.txt"
+timewindow = c(as.Date("2019-01-12"),as.Date("2020-09-01"))
+s2tiles_selected = "30SXH"
+extent = "./jardines/"
+path_l2a = "./ImagenesSentinel2/L2A"
+path_out = "./ImagenesSentinel2/"
+log = "logERR.txt"
+
+```
+
+
+
+```{r}
+
+# Elegimos los contratos que queremos descargar
+contratos <- readLines("contratos.txt")
+
+```
+
+
+```{r}
+
+for (contrato in contratos) {
+  
+  contrato
+  descarga_todos <- sen2r::sen2r(
+                  param_list = param_list,
+                  apihub = apihub,
+                  timewindow = timewindow,
+                  extent = paste(extent,contrato,".geojson",sep=""),
+                  extent_name = contrato,
+                  path_l2a = path_l2a,
+                  path_out = paste(path_out,contrato,sep=""),
+                  log = log
+                )
+}
+
+```
